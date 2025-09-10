@@ -1,16 +1,16 @@
-FROM node:20-alpine
+FROM python:3.11-alpine
 
-RUN apk add --no-cache python3 py3-pip py3-setuptools
+RUN apk add --no-cache gcc musl-dev
 
-RUN pip3 install --break-system-packages uv
+RUN pip install --no-cache-dir uv
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci --only=production
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
 EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["python", "server.py"]

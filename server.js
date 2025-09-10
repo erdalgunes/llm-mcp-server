@@ -69,47 +69,26 @@ app.post('/prompt', async (req, res) => {
     env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   }
 
-  const child = spawn('uvx', args, { env });
+  const { exec } = await import('child_process');
+  const command = `uvx ${args.map(arg => `'${arg}'`).join(' ')}`;
   
-  let output = '';
-  let error = '';
-
-  child.stdout.on('data', (data) => {
-    output += data.toString();
-  });
-
-  child.stderr.on('data', (data) => {
-    error += data.toString();
-  });
-
-  child.on('close', (code) => {
-    if (code !== 0) {
-      res.status(500).json({ error: error || 'Command failed' });
+  exec(command, { env }, (err, stdout, stderr) => {
+    if (err) {
+      res.status(500).json({ error: stderr || err.message });
     } else {
-      res.json({ response: output });
+      res.json({ response: stdout });
     }
   });
 });
 
 app.get('/models', async (req, res) => {
-  const child = spawn('uvx', ['llm', 'models', 'list']);
+  const { exec } = await import('child_process');
   
-  let output = '';
-  let error = '';
-
-  child.stdout.on('data', (data) => {
-    output += data.toString();
-  });
-
-  child.stderr.on('data', (data) => {
-    error += data.toString();
-  });
-
-  child.on('close', (code) => {
-    if (code !== 0) {
-      res.status(500).json({ error: error || 'Command failed' });
+  exec('uvx llm models list', (err, stdout, stderr) => {
+    if (err) {
+      res.status(500).json({ error: stderr || err.message });
     } else {
-      res.json({ models: output.split('\n').filter(Boolean) });
+      res.json({ models: stdout.split('\n').filter(Boolean) });
     }
   });
 });
