@@ -65,55 +65,120 @@ def prompt():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/sse/prompt', methods=['POST'])
-def sse_prompt():
-    data = request.json
-    prompt_text = data.get('prompt', '')
-    model = data.get('model', 'gpt-5-nano')
-    system = data.get('system')
-    temperature = data.get('temperature')
-    max_tokens = data.get('max_tokens')
-    
+@app.route('/sse', methods=['GET', 'POST'])
+def mcp_sse():
+    """MCP SSE endpoint that handles JSON-RPC messages"""
     def generate():
-        args = [prompt_text, '-m', model]
+        # Send initial connection message
+        yield f"data: {json.dumps({'jsonrpc': '2.0', 'method': 'connection/ready', 'params': {}})}\n\n"
         
-        if system:
-            args.extend(['-s', system])
-        if temperature is not None:
-            args.extend(['-t', str(temperature)])
-        if max_tokens is not None:
-            args.extend(['--max-tokens', str(max_tokens)])
-        
-        env = os.environ.copy()
-        if OPENAI_API_KEY:
-            env['OPENAI_API_KEY'] = OPENAI_API_KEY
-        
-        cmd = ['uvx', 'llm'] + args
-        
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env
-            )
+        # Handle incoming messages if POST
+        if request.method == 'POST' and request.json:
+            message = request.json
+            method = message.get('method')
+            id = message.get('id')
             
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    yield f"data: {json.dumps({'text': line})}\n\n"
-            
-            process.wait()
-            yield f"data: {json.dumps({'done': True, 'code': process.returncode})}\n\n"
-            
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            if method == 'initialize':
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': id,
+                    'result': {
+                        'protocolVersion': '1.0.0',
+                        'capabilities': {
+                            'tools': {}
+                        },
+                        'serverInfo': {
+                            'name': 'llm-mcp-server',
+                            'version': '1.0.0'
+                        }
+                    }
+                }
+                yield f"data: {json.dumps(response)}\n\n"
+                
+            elif method == 'tools/list':
+                response = {
+                    'jsonrpc': '2.0',
+                    'id': id,
+                    'result': {
+                        'tools': [
+                            {
+                                'name': 'llm_prompt',
+                                'description': 'Send a prompt to an LLM model',
+                                'inputSchema': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'prompt': {'type': 'string'},
+                                        'model': {'type': 'string', 'default': 'gpt-5-nano'},
+                                        'system': {'type': 'string'},
+                                        'temperature': {'type': 'number'},
+                                        'max_tokens': {'type': 'number'}
+                                    },
+                                    'required': ['prompt']
+                                }
+                            },
+                            {
+                                'name': 'llm_models',
+                                'description': 'List available LLM models'
+                            }
+                        ]
+                    }
+                }
+                yield f"data: {json.dumps(response)}\n\n"
+                
+            elif method == 'tools/call':
+                params = message.get('params', {})
+                tool_name = params.get('name')
+                args = params.get('arguments', {})
+                
+                try:
+                    if tool_name == 'llm_prompt':
+                        output = run_llm_command([
+                            args.get('prompt', ''),
+                            '-m', args.get('model', 'gpt-5-nano')
+                        ])
+                        response = {
+                            'jsonrpc': '2.0',
+                            'id': id,
+                            'result': {
+                                'content': [{'type': 'text', 'text': output}]
+                            }
+                        }
+                    elif tool_name == 'llm_models':
+                        output = run_llm_command(['models', 'list'])
+                        response = {
+                            'jsonrpc': '2.0',
+                            'id': id,
+                            'result': {
+                                'content': [{'type': 'text', 'text': output}]
+                            }
+                        }
+                    else:
+                        response = {
+                            'jsonrpc': '2.0',
+                            'id': id,
+                            'error': {
+                                'code': -32601,
+                                'message': f'Unknown tool: {tool_name}'
+                            }
+                        }
+                except Exception as e:
+                    response = {
+                        'jsonrpc': '2.0',
+                        'id': id,
+                        'error': {
+                            'code': -32603,
+                            'message': str(e)
+                        }
+                    }
+                    
+                yield f"data: {json.dumps(response)}\n\n"
     
     return Response(
         stream_with_context(generate()),
         mimetype='text/event-stream',
         headers={
             'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
             'X-Accel-Buffering': 'no'
         }
     )
