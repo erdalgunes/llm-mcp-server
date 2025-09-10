@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: llm-sse-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PORT
+        value: 3000
+    healthCheckPath: /health
+    autoDeploy: true
+    region: oregon
